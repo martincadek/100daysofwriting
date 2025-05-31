@@ -1,0 +1,662 @@
+---
+title: "Tidytext analysis of 100DaysOfWriting"
+date: 2020-03-21
+categories: ["R"]
+tags: []
+format:
+        hugo-md:
+                output-file: "index_draft"
+                output-ext:  "md"
+                fig-width: 8
+                fig-height: 5
+draft: true
+execute: 
+        warning: false
+knitr:
+        opts_chunk:
+                fig.path: ""
+---
+
+```{r detect_os}
+# Check the operating system
+if (.Platform$OS.type == "windows") {
+  # This was not teste on Win machine. 
+  root_path <- system2('cmd.exe', args = c('/c', 'dir /B /S /AD tidytext-analysis-twitter'), stdout = TRUE)
+  message('Your project path is ', root_path)
+} else if (.Platform$OS.type == "unix") {
+  root_path <- system('find ~+ -type d -name "tidytext-analysis-twitter"', intern = TRUE)
+  message('Your project path is ', root_path)
+} else {
+  cat("Unsupported operating system.")
+  root_path <- NULL
+}
+```
+
+```{r setup_local, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE) # Hide all code chunks
+options(digits = 2)
+options(scipen = 999)
+
+# work directory setup
+setwd(root_path)
+# project setup
+source(file.path(root_path, "R/module_set_proj.R"))
+```
+
+```{r load_data, include=FALSE}
+# data path
+core_url <- "https://raw.githubusercontent.com/martincadek/100daysofwriting/main/input/"
+
+# data
+tidy_twdata <- read_csv(paste0(core_url, "tidy_twdata.csv"))
+
+# Download PNG background
+png_background <- readPNG(getURLContent(paste0(core_url, "twitter_background_transparent.png")))
+
+```
+
+```{r run_analysis, include=FALSE}
+# text analysis run
+# Work in progress
+source(file.path(root_path, "R/module_text_analysis.R"))
+```
+```{r gg_lengths_and_dates, warning=FALSE, message=FALSE}
+gg_lengths_and_dates
+```
+
+This post is about a recent challenge I've finished on Twitter called [\#100DaysOfWriting](https://prolifiko.com/100daysofwriting-gentle-productivity/). The challenge itself was created by [Jenn Ashworth](http://jennashworth.co.uk/). It is also about doing a text analysis on the tweets I have produced as part of this challenge. It is both a personal example of what it is like to write a PhD thesis as well as a tutorial into text analysis. Let me know in case you find it helpful; any feedback is also welcomed.
+
+## Resources
+
+The following R packages were used in `r paste(version$version.string)` to produce the analysis below.
+
+```{r load_packages, echo=TRUE}
+library(renv) # virtual env
+# library(rtweet) # connect to Twitter API - the data is already downloaded
+library(tidyverse) # general cleaning
+library(tidytext) # text analysis
+library(qdapDictionaries) # dictionaries
+library(lubridate) # work with dates
+library(showtext) # work with fonts in ggplot2
+library(ggdark) # dark themes
+library(grid, include.only = "rasterGrob") # to do background images
+library(png, include.only = "readPNG") # to use the image
+library(ggforce, include.only = "facet_zoom") # fancy ggplot extensions
+library(ggrepel) # to repel labels / text
+library(flextable) # to make tables
+library(textdata) # for sentiment analysis
+```
+
+The blog is based on the following resources:
+
+-   [R Tweet](https://docs.ropensci.org/rtweet/)
+-   [Text Mining with R](https://www.tidytextmining.com/)
+-   [ggrepel Examples](https://ggrepel.slowkow.com/articles/examples.html)
+-   [Tutorial by Cedric Sherer](https://www.cedricscherer.com/2019/08/05/a-ggplot2-tutorial-for-beautiful-plotting-in-r/)
+
+## Code
+
+The following [repository](https://github.com/martincadek/100daysofwriting) hosts the data, R scripts, and renv.lock file that can be used to reproduce the analysis. Some tweaking may be needed. For example, setting connection to Twitter API.
+
+## Introduction to 100DaysOfTorture (Writing)
+
+Some time ago I have started the Twitter [\#100DaysOfWriting](https://prolifiko.com/100daysofwriting-gentle-productivity/) challenge. The challenge is pretty self-explanatory; you write, then post a tweet about it, maybe get some reactions from others. It is akin to \#100daysofcode and other similar challenges.
+
+Writing for 100 days straight was tough. The challenge helped me build a routine, but it also helped me manage my expectations and maybe even become a little more confident writer.
+
+By the end of the challenge, I worked out a plan on days when it made sense to write and days when to take a break. The writing days were (and remain to be) Monday, Tuesday, Thursday and one day during the Weekend.
+
+When I finished the challenge, I thought about how to share with others how the challenge went. This is how this post came to be. The idea is to introduce the challenge though basic text analysis approaches (formally known as corpus analysis or computerised text analysis) using the series of tweets I made throughout the challenge as "the corpus".
+
+Writing a PhD thesis is a sinusoid of misery and ecstatic happiness. So, here's the glimpse of this "joyride".
+
+## Brief Introduction to Text Analysis
+
+Before going into the code, I want to discuss a few principles of text analysis. After attempting some of this in my PhD, I can tell that it can be challenging. One reason is that it introduces a whole field of scientific vocabulary that feels completely alien at first - let's go through the basics.
+
+When I say the word "**corpus**", it refers to a fancy statement that there's a bunch of text that is knitted together into what is the dataset to analyse. It is a collection of texts stored on a computer and one standard way is to store the text in a data frame object.
+
+Besides corpus, there's also "**token**". Token refers loosely to a linguistic unit that can be, for example, a word, sentence, or paragraph and is usually used similarly to what "observations" or "participants," or "subjects" are in experiments (but is just a text).
+
+Finally, another useful term is "**sentiment**", which refers to what I define as emotionally loaded tokens (typically words, the most basic distinction is to simply differ which tokens are positive or negative).
+
+This is a mere tip of the iceberg. There are also ngrams, lemma, or lexical diversity, and then vast linguistics vocabulary to define various "units" of text or types of analyses. They are incredibly helpful when it comes to thinking about text but are above and beyond a blog post like this.
+
+The analysis presented here uses the following workflow:
+
+1.  Prepare Twitter data into a **corpus**
+
+2.  Prepare **tokens**
+
+3.  **Analyse**
+
+    1.  Frequency analyses and visualisations
+
+    2.  Sentiment analyses and visualisations
+
+## Preparing Corpus
+
+The data I work with comes from Twitter. What is shown below is a sanitised version of the full extract from Twitter API. To produce this data, I recommend using "{[rtweet](https://docs.ropensci.org/rtweet/)}" package; it comes with great documentation and vignettes to guide through that process.
+
+I am going to show the data as their columns. The first two columns were looking at when and who has created the tweet.
+
+```{r show_data_columns_1_2}
+head(tidy_twdata[1:2])
+```
+
+The next column was the text in the tweet. This is what will be the key focus of this analysis.
+
+```{r show_data_column_3}
+head(tidy_twdata[3])
+```
+
+The last two columns contain information about the width of text and hashtags used as part of the tweet.
+
+```{r show_data_columns_4_5}
+head(tidy_twdata[4:5])
+```
+
+What should be obvious from the columns above is that they are already stored in a data frame. In other words, this is the corpus. This may feel as cheating but it is often not that easy to get into this stage.
+
+Preparing corpus can be tedious because at the start, there is no formal order to how data are organised. All text here is already presented in one row per tweet, and this can be treated as a corpus as it is organised and clear. The text I have worked with in the past was stored in ".pdf" files, images, or one large Word document, and these are much more challenging to work with. While Word document is a text stored on the computer, it is not a corpus because it is not organised into a data frame or other format that could be used in text analysis.
+
+## Preparing Tokens
+
+Now, it would be lovely if I could simply take the text in the data and do the rest of the analysis; however, further preparations are required. The approach taken here is to further reorganise the data into tokens.
+
+This means I have to define what is a token (word, sentence, or longer?), what words to remove (stop words? numbers? others?), whether to pair tokens into bigrams or ngrams, or compound tokens (for example, the word "Local" and "Government" has to be treated as "Local Government").
+
+It is possible to do some of these tasks by hand but not feasible nor practical to do it all by hand for large volumes of data. To facilitate the process here, I will use some custom functions to clean text, dictionaries to capture meaningful words, and {[tidytext](https://juliasilge.github.io/tidytext/)} library to tokenise the data and remove stop words.
+
+I will use {tidytext} package throughout this post as it is fairly straightforward and beginner-friendly. However, this is actually *not* my go-to library for corpus analysis. For large projects, I recommend {[quanteda](https://quanteda.org/)} package/project, which I have been using for most of my text analysis in my dissertation. If there's any interest in covering this package, I would be happy to write an introduction around this as well.
+
+Let's proceed to preparing the tokens for text analysis. There will be the following steps.
+
+### Step 1 Flattening Text into Tokens {wip=""}
+
+Preparing tokens requires "extracting" a token from each unit of text in the corpus and storing it as one row per token. This is somewhat similar to flattening a JSON file. This would be tedious to do manually, but it is fairly straightforward using the `unnest_tokens()` function from {tidytext} package. See below a head of the output from this function (showing only relevant columns).
+
+```{r tokenize_example, echo=TRUE}
+# tidytext approach to get tokens - as sentences
+
+cleaned_tokens <- unnest_tokens(
+     tbl = tidy_twdata, # data where to look for input column
+     output = sentences, # output column
+     input = text, # input column
+     token = "sentences") # definition of token
+
+head(cleaned_tokens[c("sentences")]) # column of tokens
+```
+
+In this case, tokens are defined as sentences (`token`), which I take from the `text` variable (`input`) stored in the data frame or tibble (`tbl`) and flatten into a new data frame (tibble) that stores the tokens in the `sentences` (`output`) column.
+
+Aside from "sentences", the function can also create the following types of tokens:
+
+> "words" (default), "characters", "character_shingles", "ngrams", "skip_ngrams", "sentences", "lines", "paragraphs", "regex", "tweets" (tokenization by word that preserves usernames, hashtags, and URLS), and "ptb" (Penn Treebank)
+
+### Step 2 Cleaning Tokens
+
+After creating a new data frame that organises text into tokens, I should ensure that the tokens are sensible. In this case, I am cleaning the text **after** it has been tokenised, but it would be fine to clean it beforehand too and tokenise later or combine further cleaning arguments into the tokenisation function. This is possible by supplying further arguments into the function, for example, `unnest_tokens(..., strip_punct)` in {tidytext} or `tokens(..., remove_punct = TRUE)` in {quanteda} package I mentioned earlier.
+
+I think it is simpler to separate this process to illustrate it, but in practice, it should be combined to save typing and make the code more concise.
+
+I will illustrate three approaches to clean the tokens. Using custom functions, packaged functions, and dictionaries. They are not exclusive steps, usually, they complement each other.
+
+#### Using custom functions
+
+A custom function can be used to clean tokens. How such a function could look? The following example is a low-dependency custom function built with {base} R that uses `gsub` function.
+
+The function consists of several arguments but the key one is `gsub(pattern, replacement, x, ignore.case = FALSE)`. The `pattern` is what the function tries to look for, for example "apple". The `replacement` is obvious, in this case, I simply replace it with nothing, i.e., `""`. However, this means that empty character vectors with `""` are created and they will have to be removed later on, for example, by converting them to explicit NA. The `x` refers to the place where to look for the previous arguments, usually a character vector. Finally, `ignore.case` tells the function if it should differ between "Apple" and "apple" or treat them as identical.
+
+A fully developed function to clean text data could look like this, look at corresponding comments to see what each line does.
+
+```{r, echo=TRUE, eval = FALSE}
+# create token cleaner function
+clean_tokens <- function(raw_token, empty_as_na = FALSE){
+        # remove specific word - #100daysofwriting
+        raw_token <- gsub("(\\b100daysofwriting\\b)", 
+                          x = raw_token, ignore.case = TRUE, 
+                          replacement = "")
+        # remove URLs
+        raw_token <- gsub("\\s?(f|ht)(tp)(s?)(://)([^\\.]*)[\\.|/](\\S*)", 
+                          x = raw_token, 
+                          replacement = "")
+        # remove HTTPs
+        raw_token <- gsub("http\\S+\\s*", 
+                          x = raw_token, 
+                          replacement = "")
+        # remove non-printable or special characters such as emoji
+        raw_token <- gsub("[^[:alnum:][:blank:]?&/\\-]", 
+                          x = raw_token, 
+                          replacement = "") 
+        # remove leftover of non-printable or special characters such as emoji
+        raw_token <- gsub("U00..", 
+                          x = raw_token,
+                          replacement = "") 
+        # remove all digits
+        raw_token <- gsub("\\d+",
+                          x = raw_token, 
+                          replacement = "") 
+        # remove .com and .co after URLs
+        raw_token <- gsub("\\S+\\.co+\\b", 
+                          x = raw_token, 
+                          replacement = "") 
+        # remove all punctuation
+        raw_token <- gsub("[[:punct:]]", 
+                          x = raw_token, 
+                          replacement = "") 
+        # remove trailing whitespaces
+        raw_token <- trimws(x = raw_token, which = "both") 
+        # remove double space
+        raw_token <- gsub("[[:space:]]+", 
+                          x = raw_token, 
+                          replacement = " ") 
+        # remove specific word - "day"
+        raw_token <- gsub("(\\bday\\b)|(\\bDay\\b)", 
+                          x = raw_token, 
+                          replacement = "")
+        # replace empty strings as NA or keep them there
+        # (useful if you need to then drop all NAs)
+        if (empty_as_na == TRUE) {
+                raw_token <- gsub("^$", 
+                                  replacement = NA, 
+                                  x = trimws(raw_token))
+                tidy_token <- raw_token
+                # explicit return in IF
+                return(tidy_token) # this is optional but it makes it more clear
+                } # End of if statement
+        else {
+        tidy_token <- raw_token
+        # explicit return in if was not triggered
+        return(raw_token) # this is optional but it makes it more clear
+                } # End of else statement
+        } # End of function
+```
+
+Note that it matters what is done first. For example, removing all whitespace first would mean words are compounded, e.g. "apple pear" becomes "applepear", therefore, it has to be one of the last steps.
+
+I am using the function to clean sentence tokens, but to illustrate how it works, the function could be then used in the following context.
+
+```{r, echo=TRUE, results='hide', eval = FALSE}
+clean_tokens("This is https://twitter.com sen###124444tence.", empty_as_na = TRUE)
+```
+
+The result would be turning the sentence from: *"This is <https://twitter.com> sen\#\#\#124444tence."* into the: "`r clean_tokens("This is https://twitter.com sen###124444tence.", empty_as_na = TRUE)`".
+
+#### Using package functions
+
+Another way to clean tokens is to use some function developed by authors of packages for text analysis. A common step is to remove stopwords from tokens, this means getting rid of all words such as "the", "to", or "is". It is typically implemented into the packages in some fashion. For example, {tidytext} offers the lexicon solution to remove stopwords as part of `stop_words` object that is passed into `anti_join()` function (which is part of {dplyr}). The {quanteda} offers its own function `stopwords(kind = quanteda_options("language_stopwords"))` which is passed into `tokens_remove(tokens, c(stopwords("english"))`. This offers a reproducible way to clean the tokens and has a potential to even extend further as there are packages that collect stopwords for other languages (e.g., {[stopwords](http://stopwords.quanteda.io/)}).
+
+I was using the stop_words function, a simple example is below.
+
+```{r, echo=TRUE, results='hide', eval = FALSE}
+tidy_twdata %>%
+        # tidytext approach to get tokens - as words
+        unnest_tokens(word, 
+                      text,
+                      token = "words") %>%
+        # remove stopwords such "this", "or", "and"
+        anti_join(stop_words)
+```
+
+#### Using dictionaries
+
+Finally, the last method I have utilised was dictionaries. These can be really helpful as a dictionary is typically a vector, list, or data frame that contains words that fall under the same category.
+
+However, the category can be specific or broad such as the one I used for cleaning. An example of a more specific category is a sentiment dictionary (containing words related to positive / negative feelings). An example of a broad category can be a list of words commonly used in the English language.
+
+As I wanted to ensure that no strange words, acronyms or nonsensical parts left out from cleaning hashtags and URLs were present, I used the {[qdapDictionaries](http://trinker.github.io/qdapDictionaries/)'} Augmented List of Grady Ward's English Words and Mark Kantrowitz's Names List. This is a dataset augmented for spell-checking purposes. Thus, it should filter out words that are not grammatically correct.
+
+Below is an example of how it was used. Notice the `filter(word %in% english_words_dictionary)` this is where I tell R to filter words that are occurring in the dictionary. I treat anything that does not occur in the dictionary as meaningless.
+
+```{r, echo=TRUE, results='hide', eval = FALSE}
+
+# load dictionary
+english_words_dictionary <- qdapDictionaries::GradyAugmented
+
+# use dictionary
+cleaned_tokens <- tidy_twdata %>%
+        # tidytext approach to get tokens - as words
+        unnest_tokens(word, 
+                      text,
+                      token = "words") %>%
+        # remove stopwords such "this", "or", "and"
+        anti_join(stop_words) %>%
+        # keep only words that are in the dictionary
+        filter(word %in% english_words_dictionary)
+```
+
+While this can be an extremely efficient way to quickly clean text, it may also remove less standard phrases. To avoid this, a dictionary can be customised, it is usually as simple as removing certain words from a data frame.
+
+## Presenting Cleaned Tokens
+
+This section shows the output after applying the approaches mentioned above. While these approaches are not foolproof, I feel it can get anyone fairly far depending on how much they wish to fiddle with their cleaning functions or dictionaries.
+
+Two outputs were produced, first was the data frame with tokens as words.
+
+```{r}
+head(token_words)
+```
+
+The second was the data frame with tokens as sentences.
+
+```{r}
+head(token_sentences)
+```
+
+These two outputs were saved as `token_words` and `token_sentences` and are used in the next section that computed several aggregations.
+
+Here's the revised text, with corrected grammar, changed to first-person writing style, and maintained in British English:
+
+Two outputs were produced; first was the data frame with tokens as words.
+
+```{r show_token_words}
+head(token_words)
+```
+
+The second was the data frame with tokens as sentences.
+
+```{r show_token_sentences}
+head(token_sentences)
+```
+
+I saved these two outputs as `token_words` and `token_sentences` and used them in the next section where I computed several aggregations.
+
+## Aggregating Tokens
+
+After cleaning my tokens, I can now commence real text analysis. I can present a simple frequency of words to more complex analyses such as a [topic model](https://en.wikipedia.org/wiki/Topic_model) or applying classifiers to text, for example, a [Naive Bayes classifier](https://en.wikipedia.org/wiki/Naive_Bayes_classifier)
+
+I am keeping things simple and will present three common analyses. Below each bullet point is an example of code (full code available [here](https://github.com/martincadek/100daysofwriting)) to produce this type of aggregation and a short description of what I did. In the visualization, I present further analyses that build or use a combination of these three types. This should illustrate that even relatively simple analytical approaches can be quite powerful.
+
+-   **Frequencies**
+
+    -   Everyone knows frequencies. They are simple to make once a data frame of tokens is available. The code below takes the data frame, then `count` of the word column with sorting. This produces an aggregate with an 'n' column that counts the number of occurrences. These are then summed to totals, and relative frequencies are produced as `n / sum(n)`. The `reorder` ensures that words are ordered by their occurrence.
+
+```{r count_of_token_words, echo=TRUE, results='hide', eval = FALSE}
+token_words %>%
+     count(word, sort = TRUE) %>%
+     mutate(
+          total = sum(n),
+          word = reorder(word, n),
+          proportion = n / sum(n))
+```
+
+-   [**Term frequency-inverse document frequency (TF-IDF)**](https://en.wikipedia.org/wiki/Tf%E2%80%93idf)
+
+    -   The problem with simple frequencies is that they do not account for features of text that are unique and important. A simple approach to use is either rank and weight frequencies or produce something known as [TF-IDF](https://www.tidytextmining.com/tfidf.html). This measure (in theory) takes into account the total proportion of the word and inverse document term proportion. The document can be anything that further groups the tokens. In this case, my "documents" were months of the challenge.
+
+    -   For example, the word "*writing*" occurred in August 2020 8 times across 1279 total occurrences; therefore, the TF = 8/1271 = 0.0063. The IDF is log() of the ratio of all documents / documents containing a given word. In this case, "writing" occurred in 6 documents out of 8 (documents = months), hence IDF = log(8/6) = 0.29. Finally, the TF-IDF = 0.29\*0.0063 = 0.0018. The formula works in a way that rare words have higher importance (i.e., larger tf-idf means higher importance), and words that are very frequent are weighted down. IDF is, therefore, low for high-occurring words such as stop words.
+
+```{r, echo=TRUE, results='hide', eval = FALSE}
+token_words %>%
+     mutate(
+          month_date = paste0(year(created_at), " ", months.Date(created_at)),
+          month_date = factor(month_date, levels = date_ym_fct,
+                              date_ym_fct, ordered = TRUE)) %>% 
+     count(word, month_date, sort = TRUE) %>%
+     mutate(
+          total = sum(n),
+          word = reorder(word, n),
+          proportion = n / sum(n)) %>%
+     bind_tf_idf(word, month_date, n) %>%
+     arrange(desc(tf_idf))
+```
+
+-   [**Sentiment analysis**](https://en.wikipedia.org/wiki/Sentiment_analysis)
+
+    -   Sentiment analysis is really just an extension of a dictionary approach. The idea is to associate each word with a certain category of sentiment, for example, "good" will be categorized as positive. The way it works in tidytext is that each word is `inner_join` to a group in the sentiment dictionary. It can then be counted how many positive words occurred or what was the ratio of positive / negative.
+
+```{r sentiment_token_overall, echo=TRUE, results='hide', eval = FALSE}
+bing <- get_sentiments("bing")
+
+sentiment_token_overall <-  token_words %>%
+        inner_join(bing) %>%
+        count(word, sentiment, sort = TRUE) %>%
+        mutate(
+             rownumber = row_number(),
+             total = sum(n),
+             word = reorder(word, n),
+             proportion = n / sum(n))
+```
+
+## Presenting Text Analysis using ggplot2
+
+The last section will present the text analyzing of the corpus. I aim to deliver these results by presenting less text and more visuals; therefore, I will comment scarcely. If you want to see how each visual was produced, please see the following [code](https://github.com/martincadek/100daysofwriting).
+
+I will present the distribution of tokens, frequencies, TF-IDF, and conclude with sentiment analysis.
+
+### Distribution of Tokens
+
+The first thing I look at is a histogram showing a distribution of how many times words occurred in the corpus. The histogram shows that words typically occurred only once, and only on rare occasions occurred more than that. This is fairly typical for the analysis of text (many words occur few times, and few occur many times).
+
+```{r distribution, warning=FALSE, message=FALSE}
+ggplot(freq_token_words, aes(x = n)) +
+        geom_histogram(bins = 50) +
+        # play with the lims
+        facet_zoom(ylim = c(0, 100), xlim = c(20, 40)) +
+        labs_100daysofwriting(
+                x = "Frequency [word]", 
+                y = "Frequency [occurrence]",
+                title = "Word Occurrence/Frequency",
+                caption_width = 135,
+                caption = "The histogram shows how many times a word occurred (x-axis) and how prevalent this occurrence was in the sample (y-axis).
+                For example, the histogram shows a long right tail (right panel), i.e., over 400 words occurred only once. The zoomed histogram (left panel) illustrates that words occurring 20 or more times were rare. Note that word tokens 'day'/'days' were removed from the corpus."
+                )  +
+        theme_100daysofwriting(default_size = 12) +
+        theme(strip.background = element_rect(fill = "grey20", colour = NA)) +
+        geom_curve(aes(x = 4, y = 400, xend = 40, yend = 10),
+                   size = 1, color = "white",
+                   arrow = arrow(length = unit(0.045, "npc"))) + 
+        geom_text(aes(x = 37, y = 37), 
+                  colour = "white", family = "Inconsolata",
+                  label = "Frequent\nwords") + 
+        geom_text(aes(x = 10, y = 400), 
+                  colour = "white", family = "Inconsolata",
+                  label = "Rare\nwords")
+```
+
+This is often the subject of further research as it is interesting to look at the relationship between word frequency and its rank. Below, I am illustrating this using a classical example known as [Zipf's Law](https://www.tidytextmining.com/tfidf.html?q=zipf#zipfs-law).
+
+> Zipf's law states that the frequency that a word appears is inversely proportional to its rank.
+
+```{r zipf, warning=FALSE, message=FALSE}
+ggplot(freq_rank_token_words, aes(x = rank, y = word_frequency)) + 
+        geom_line(size = 1.1, alpha = 0.8, show.legend = FALSE) + 
+        geom_abline(intercept = -1.3370, slope = -0.6825,
+                    color = "#CC3333", linetype = 2) +
+        scale_x_log10() +
+        scale_y_log10() +
+        labs_100daysofwriting(
+                x = "rank of word [log]",
+                y = "frequency of word [log]",
+                title = "Frequency of words by rank",
+                caption = "The graph illustrates what is known as Zipf's law.
+                This can be also observed in the histograms.
+                The law states that there will be a small number of words occurring very frequently and a large number of words occurring very rarely (i.e., usually once)"
+                ) +
+        theme_100daysofwriting(default_size = 10) + 
+        geom_text(aes(x = 1.5, y = 0.09), 
+                  colour = "white", family = "Inconsolata",
+                  label = "Lots of words\noccurring rarely") + 
+        geom_text(aes(x = 390, y = 0.002), 
+                  colour = "white", family = "Inconsolata",
+                  label = "Few words\noccurring frequently")
+```
+
+### Frequencies of Word and Sentence Tokens
+
+An elegant way to present data from text analysis is to show how many times certain tokens (words or sentences) occurred, what percentage of the corpus did a particular word cover, and illustrate examples of common and rare words.
+
+I show below the frequency and relative frequency of word tokens, and a sample of sentences in relationship to their length.
+
+Frequency of common words (top 15) should not be surprising to anyone who knows the corpus. The most common word (after removing some stop words and the "day" word) was "writing". This is helpful to get a quick sense of what is in the corpus.
+
+```{r word_frequency, warning=FALSE, message=FALSE}
+ggplot(freq_token_words %>% slice_max(word, n = 15), aes(n, word)) +
+        geom_col() +
+        labs_100daysofwriting(
+                x = NULL,
+                y = NULL,
+                title = "Frequency of words used during the challenge",
+                caption = "Top 15 words are selected. Note that word tokens 'day'/'days' were removed from the corpus."
+                ) +
+        theme_100daysofwriting()
+```
+
+Relative frequency then shows the information above as relative to the whole corpus.
+
+```{r relative_word_frequency, warning=FALSE, message=FALSE}
+ggplot(freq_token_words %>% slice_max(word, n = 15), aes(proportion, word)) +
+        geom_col() +
+        scale_x_continuous(labels = scales::percent_format()) +
+        labs_100daysofwriting(
+                title = "Relative frequency of words used during the challenge",
+                caption = "Top 15 words are selected. Note that word tokens 'day'/'days' were removed from the corpus.") +
+        theme_100daysofwriting()  
+
+```
+
+Visualizing examples of sentences was a little difficult as I had to find a creative way to present the sentence. I chose using only a sample of sentences and present them as an association with their length. The lengths of sentences were binned, and these bins were then used to sample.
+
+```{r sentence_sample, warning=FALSE, message=FALSE}
+ggplot(sample_token_sentences %>%
+               mutate(sentences = wrap_caption(sentences, max_width = 50)),
+       aes(y = display_text_width, x = row)) +
+        expand_limits(y = c(-50, 220), x = c(0, 17.5)) +
+        geom_text_repel(aes(label = sentences, angle = -50),
+                        size = 3, # the sentence size
+                        color = "#CC3333",
+                        segment.color = "gray50",
+                        direction = "y",
+                        family = "Inconsolata",
+                        seed = 120,
+                        ylim = c(-45, 200),
+                        max.overlaps = Inf,
+                        max.time = 20,
+                        force = 15,
+                        force_pull = 0) +
+        geom_point(color = "gray50", size = 2, alpha = 0.5) +
+        scale_y_continuous() +
+        labs_100daysofwriting(title = "sample of sentences", y = "text width",
+                              caption = "The random sample consists of 16 sentences. First, the text width was split into bins, and one sentence was selected randomly from each bin.") +
+        theme_100daysofwriting(default_size = 15) +
+        theme(axis.text.x = element_blank(),
+              axis.ticks = element_blank(),
+              panel.grid.minor.x = element_blank(),
+              panel.grid.major.x = element_blank(),
+              panel.grid.minor.y = element_blank())
+```
+
+The above can also be shown as a tabular output. Which might be a little more user-friendly.
+
+```{r sentence_sample_tbl, warning=FALSE, message=FALSE}
+table_sentences
+
+```
+
+## TF-IDF
+
+I covered what TF-IDF is above. Here I am presenting the TF-IDF in the context of months. First, I show the relative frequency (%) of words per each month. This simply extends the frequencies by grouping the tokens by month.
+
+This starts to show much more interesting findings. For example, months were not consistently just about writing. As I was nearing the end of the challenge, I was finishing discussion, and eventually, I went onto editing. This is something worth stressing in text analysis. Any natural groupings are, in my opinion, a far better way to interpret results than throwing tokens into a topic modelling or similar classification method. This is because without some prior sense of what data is about, the result of these complicated models is usually impossible to interpret.
+
+```{r plot_monthly_relative_frequency, warning=FALSE, message=FALSE}
+tfidf_token_words_month %>% 
+        group_by(month_date) %>%
+        slice_max(proportion, n = 10) %>% 
+        ungroup() %>%
+        ggplot(aes(y = reorder_within(word, proportion, month_date), x = proportion, fill = month_date)) +
+        geom_col(show.legend = FALSE) +
+        scale_y_reordered() +
+        scale_x_continuous(labels =  scales::percent_format()) +
+        scale_fill_manual(values = custom_palette(8)) +
+        facet_wrap(~ month_date, nrow = 2, scales = "free") +
+        labs_100daysofwriting(
+                title = "Relative frequency of the most common words",
+                caption = "The words shown here are approximately the top 10 words per each month. The x-axis shows the relative frequency of those words in the corpus."
+                ) +
+        theme_100daysofwriting(default_size = 15) 
+```
+
+TF-IDF then tries to account for words that are important relative to other months. In this context, words such as "writing" are essentially treated as obvious enough to not be worth analysing (the same way an analyst would remove stop words). The result is drastically different bar charts showing some other words that defined my writing experience.
+
+```{r plot_tfidf_analysis, warning=FALSE, message=FALSE}
+tfidf_token_words_month %>% 
+        group_by(month_date) %>%
+        slice_max(tf_idf, n = 7) %>%
+        ungroup() %>%
+        ggplot(aes(y = reorder_within(word, tf_idf, month_date), x = tf_idf, fill = month_date)) +
+        geom_col(show.legend = FALSE) +
+        scale_y_reordered() +
+        scale_fill_manual(values = custom_palette(8)) +
+        facet_wrap(~ month_date, nrow = 2, scales = "free") +
+        labs_100daysofwriting(title = "TF-IDF",
+                              caption = "The words shown here are approximately the top 10 words per each month. TF-IDF attempts to show words that are distinctive of each month.") +
+        theme_100daysofwriting(default_size = 15) 
+```
+
+## Sentiment
+
+One of the very popular and perhaps overused text analytical methods is [sentiment analysis](https://www.tidytextmining.com/sentiment.html). The idea of sentiment analysis is that it provides a fast and standardized way of associating words with emotions. This is usually done by using a dictionary approach to join defined words to words in the corpus. It is used to evaluate many words and save the analyst's time but it may not be suitable for all corpora and sometimes it fails in comparison to qualitative methods where the analyst categorises the words on his or her own. The sentiment analysis below will show three charts.
+
+First, I present a relative frequency of the most common negative and positive sentiment. These are interesting words to me as it shows how I felt about the challenge of writing my thesis at times or what was pleasant.
+
+```{r plot_sentiment_frequency, warning=FALSE, message=FALSE}
+sentiment_token_overall %>%
+        slice_max(n, n = 15) %>%
+        ggplot(aes(y = reorder_within(word, n, sentiment), x = n, fill = sentiment)) +
+        geom_col(show.legend = FALSE) +
+        scale_y_reordered() + 
+        scale_fill_manual(values = custom_palette_sentiment(2)) +
+        facet_wrap( ~ sentiment, scales = "free_y") +
+        labs_100daysofwriting(
+                title = "Sentiment of the most frequent words",
+                caption = "The words shown here are approximately the top 10 words.") +
+        theme_100daysofwriting(default_size = 15) 
+```
+
+I also felt it was important to provide some idea of how sentiment changed over time. Surprisingly, at the beginning, the sentiment was on average more negative. Maybe I was motivated but realised it is also challenging. This is a very rough idea and you can see that these vary a lot in their "errors" (the bar shows standard deviation around the mean).
+
+```{r plot_sentiment_over_time, warning=FALSE, message=FALSE}
+sentiment_average_month %>%
+        ggplot(aes(x = month_date, y = average_sentiment, group = 1, colour = average_sentiment)) +
+        geom_line(size = 1.5) +
+        geom_point(size = 4, alpha = 2) +
+        geom_errorbar(aes(ymin = average_sentiment - sd_sentiment, ymax = average_sentiment + sd_sentiment),
+                      size = 1) +
+        scale_colour_gradient(low = "#CC3333", high = "#33cc80", guide = FALSE) +
+        labs_100daysofwriting(title = "Sentiment during the challenge",
+                              caption = "The graph shows aggregate computed as the difference between the number of positive and the number of negative words. The difference is then averaged over the months. Standard deviation is plotted as error bars around the mean.") +
+        theme_100daysofwriting(default_size = 15) 
+
+```
+
+Finally, I tried to show which words were prominent each month. The x-axis dates, y-axis number of words, and around the points are samples of those words. This overlaps with the previous graphs in terms of the middle part of the challenge containing the most positive sentiment.
+
+```{r plot_sentiment_words_monthly, warning=FALSE, message=FALSE}
+sentiment_token_words_month %>%
+        filter(n > 1) %>%
+        ggplot(aes(y = n_total_month, x = month_date, group = 1)) +
+        geom_line(color = "white", lwd = .8) +
+        geom_point(size = 5) +
+        geom_text_repel(aes(label = word, colour = sentiment),
+                        segment.color = "white",
+                        direction = "both",
+                        family = "Inconsolata",
+                        segment.curvature = -0.1,
+                        segment.ncp = 10,
+                        segment.angle = 15,
+                        seed = 110,
+                        max.overlaps = Inf,
+                        max.time = 20,
+                        force = 5,
+                        force_pull = 0) +
+        scale_colour_manual(values = custom_palette_sentiment(2)) +
+        labs_100daysofwriting(y = "Total number of words\nwith sentiment") +
+        theme_100daysofwriting(default_size = 15) +
+        guides(color = "none")
+```
+
+## Conclusion
+
+This concludes the text analysis and my writing challenge. It was interesting for me to see the challenge presented like this, and I hope potential readers may find this post useful. Please contact me if you have any feedback.
